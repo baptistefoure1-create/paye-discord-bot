@@ -1,0 +1,177 @@
+============================================================
+ PILLBOX PAIE TEST - V0.2.8 - NORTHFLANK 24/7
+============================================================
+
+OBJECTIF
+-------
+Le bot /paye tourne sur Northflank.
+Tu peux fermer ton navigateur, fermer CMD et éteindre ton PC.
+
+IMPORTANT
+---------
+Ne mets JAMAIS ton fichier .env dans GitHub.
+Le ZIP fourni ne contient pas ton token Discord.
+Le token sera ajouté directement dans Northflank comme variable secrète.
+
+============================================================
+ ETAPE 1 - METTRE CE DOSSIER SUR GITHUB
+============================================================
+
+Méthode conseillée avec GitHub Desktop :
+
+1. Décompresse complètement le ZIP V0.2.8.
+2. Ouvre GitHub Desktop.
+3. File > Add local repository.
+   Si le dossier n'est pas encore un dépôt, choisis Create a repository.
+4. Choisis ce dossier V0.2.8 comme dossier du dépôt.
+5. Nom conseillé :
+
+   pillbox-paie-discord-bot
+
+6. Vérifie que .env N'APPARAIT PAS dans les fichiers à publier.
+7. Commit les fichiers.
+8. Clique Publish repository / Push origin.
+
+Le dépôt peut être privé.
+
+============================================================
+ ETAPE 2 - CREER LE PROJET NORTHFLANK
+============================================================
+
+1. Connecte-toi sur Northflank.
+2. Crée un projet.
+   Nom conseillé : Pillbox-Paie-Test
+3. Ouvre le projet.
+4. Create new > Service.
+5. Choisis : COMBINED SERVICE.
+
+Pourquoi Combined Service ?
+Northflank construit le dépôt GitHub puis lance directement le bot.
+
+============================================================
+ ETAPE 3 - CONFIGURER LE SERVICE
+============================================================
+
+Nom conseillé :
+
+pillbox-paie-bot
+
+Repository :
+- sélectionne ton dépôt GitHub pillbox-paie-discord-bot
+- branche : main (ou master si ton dépôt utilise master)
+
+Build options :
+- Dockerfile
+- Dockerfile path : /Dockerfile
+- Build context/work directory : /
+
+NETWORKING :
+- N'AJOUTE AUCUN PORT PUBLIC
+- N'AJOUTE AUCUN PORT PRIVE
+
+Le bot Discord n'héberge pas un site web.
+Il n'a pas besoin de domaine ni de port HTTP.
+
+Instances :
+- 1 instance
+
+============================================================
+ ETAPE 4 - VARIABLES NORTHFLANK
+============================================================
+
+Dans Environment variables / Runtime variables, ajoute :
+
+DISCORD_TOKEN = ton token de bot Discord actuel
+CLIENT_ID     = 1564403459187548240
+GUILD_ID      = 1564379186657763431
+
+ATTENTION :
+- ne mets pas de guillemets autour des valeurs
+- pas d'espace avant/après le token
+- utilise des variables RUNTIME, pas des build arguments
+
+============================================================
+ ETAPE 5 - CREER / DEPLOYER
+============================================================
+
+Crée le Combined Service.
+Northflank va :
+
+1. récupérer GitHub
+2. lire /Dockerfile
+3. installer Node.js + discord.js
+4. exécuter npm start
+5. enregistrer/vérifier /paye dans ton serveur Discord
+6. connecter le bot à Discord
+
+Dans les logs tu dois voir quelque chose proche de :
+
+Commande /paye vérifiée/déployée automatiquement sur le serveur de test.
+[Northflank/24-7] Pillbox Paie connecté à Discord en tant que Pillbox Paie Test#2978
+[Northflank/24-7] Serveur cible : 1564379186657763431 - commande /paye disponible.
+[Northflank/24-7] Le processus reste actif tant que ce service Northflank est démarré.
+
+A ce moment :
+- ferme le navigateur si tu veux
+- éteins ton PC si tu veux
+- /paye doit continuer à fonctionner
+
+============================================================
+ SI LE BUILD ECHOUE
+============================================================
+
+Regarde BUILD LOGS.
+
+Erreurs fréquentes :
+
+1. DISCORD_TOKEN manquant
+   -> ajoute la variable dans Runtime variables.
+
+2. Invalid token
+   -> le token Discord est mauvais/réinitialisé.
+
+3. Missing Access / Missing Permissions
+   -> vérifie que le bot est encore dans le serveur de test.
+
+4. Privileged intent
+   -> Discord Developer Portal > Bot
+      vérifie les intents nécessaires au bot, notamment Server Members Intent
+      et Message Content Intent si Discord l'exige pour ton application.
+
+5. /paye absente
+   -> regarde les logs au démarrage.
+      Le bot enregistre lui-même la commande sur GUILD_ID.
+
+============================================================
+ MISES A JOUR FUTURES
+============================================================
+
+Une fois Northflank lié au dépôt GitHub :
+
+1. remplace/modifie les fichiers du projet local
+2. commit avec GitHub Desktop
+3. Push origin
+
+Northflank peut automatiquement reconstruire et redéployer la branche liée.
+Tu n'as normalement plus besoin d'un script .bat de déploiement.
+
+ATTENTION : un redéploiement redémarre le bot.
+Ne fais pas une mise à jour pendant une session de paie importante tant que
+les sessions ne sont pas encore persistantes.
+
+============================================================
+ VERIFICATION RAPIDE
+============================================================
+
+[ ] Dépôt GitHub créé
+[ ] .env absent de GitHub
+[ ] Combined Service Northflank
+[ ] Dockerfile = /Dockerfile
+[ ] Aucun port réseau
+[ ] 1 instance
+[ ] DISCORD_TOKEN ajouté en Runtime variable
+[ ] CLIENT_ID = 1564403459187548240
+[ ] GUILD_ID = 1564379186657763431
+[ ] Logs : bot connecté
+[ ] /paye fonctionne PC éteint
+============================================================

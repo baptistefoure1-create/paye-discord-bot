@@ -1,0 +1,20 @@
+{
+  "name": "ems-discord-paie-bot",
+  "version": "0.2.8",
+  "private": true,
+  "description": "Bot Discord de gestion des payes EMS - version Northflank 24/7",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node deploy-commands.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7"
+  }
+}

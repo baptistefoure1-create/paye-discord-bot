@@ -1,0 +1,30 @@
+PILLBOX PAIE TEST - CHANGELOG V0.2.8 NORTHFLANK
+================================================
+
+Hébergement
+-----------
+- Migration du paquet 24/7 de Railway vers Northflank.
+- Suppression des scripts et documents Railway dans ce paquet.
+- Déploiement conseillé via GitHub + Northflank Combined Service.
+- Aucun port public requis pour le bot Discord.
+
+Correctif Docker important
+--------------------------
+- Les anciennes versions utilisaient `npm ci --omit=dev` sans fournir de
+  package-lock.json.
+- V0.2.8 utilise `npm install --omit=dev --no-audit --no-fund`, compatible
+  avec le contenu réel du ZIP.
+
+Bot
+---
+- Version package : 0.2.8.
+- Enregistrement automatique de /paye conservé au démarrage.
+- Passage explicite à Events.ClientReady.
+- Logs de démarrage adaptés à Northflank/24-7.
+- Aucune règle métier de paie modifiée.
+- Aucun token Discord intégré au paquet.
+
+Limitation conservée
+--------------------
+- Les sessions actives restent en mémoire seulement. Un redémarrage ou un
+  redéploiement pendant une session la perd.

@@ -1,0 +1,40 @@
+PILLBOX PAIE TEST - V0.2.8 NORTHFLANK
+======================================
+
+Tests métier exécutés avec : node --test
+
+Résultat :
+- Tests : 25
+- Réussis : 25
+- Échecs : 0
+- Suites échouées : 0
+
+Couverture des tests existants :
+- parsing tableau EMS
+- colonnes vides / paye
+- parsing réanimations
+- normalisation des noms
+- rapprochement étape 3
+- noms orphelins
+- fusion de plusieurs anciens noms
+- quota STAFF
+- grades exemptés
+- BNVL
+- quota non atteint
+- Top 3
+- égalités Top 3
+- transitions Q/S
+- PAYES des hauts gradés à 0 réanimation
+- TABLEAU COMPLET
+- avertissements et promotions
+- pings Discord des joueurs reconnus
+- fallback nom RP si joueur non trouvé
+- rétrogradations
+
+Vérifications V0.2.8 :
+- src/index.js : syntaxe valide
+- src/registerCommands.js : syntaxe valide
+- deploy-commands.js : syntaxe valide
+- Dockerfile : corrigé pour ne plus dépendre d'un package-lock absent
+- aucun fichier .env inclus dans le paquet
+- aucune logique de paie modifiée pour la migration Northflank
