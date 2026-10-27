@@ -31,7 +31,7 @@ jobs:
           path = Path('scripts/apply_v029.py')
           text = path.read_text(encoding='utf-8')
           old = "out, count = re.subn(pattern, replacement, text, count=1, flags=flags)"
-          new = "out, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=flags)"
+          new = "out, count = re.subn(pattern, replacement.replace(r'\\u', r'\\\\u'), text, count=1, flags=flags)"
           if old not in text:
               raise SystemExit('Correctif sub_once introuvable')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
