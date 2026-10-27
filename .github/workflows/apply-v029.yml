@@ -1,0 +1,51 @@
+name: Apply and test V0.2.9
+
+on:
+  push:
+    branches:
+      - v0.2.9-improvements
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: v0.2.9-improvements
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply V0.2.9 patch
+        run: python3 scripts/apply_v029.py
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax checks
+        run: |
+          node --check src/index.js
+          node --check src/services/matchingService.js
+          node --check src/services/warningService.js
+          node --check src/services/discordRoleService.js
+          node --check src/services/txtGenerator.js
+
+      - name: Run tests
+        run: npm test
+
+      - name: Commit tested V0.2.9
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f scripts/apply_v029.py .github/workflows/apply-v029.yml
+          git add -A
+          git commit -m "V0.2.9 - étape 3 rapide, avertissements et rôles Discord"
+          git push origin v0.2.9-improvements
