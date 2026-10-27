@@ -30,11 +30,30 @@ jobs:
           from pathlib import Path
           path = Path('scripts/apply_v029.py')
           text = path.read_text(encoding='utf-8')
-          old = "out, count = re.subn(pattern, replacement, text, count=1, flags=flags)"
-          new = "out, count = re.subn(pattern, replacement.replace(r'\\u', r'\\\\u'), text, count=1, flags=flags)"
-          if old not in text:
+
+          old_helper = "out, count = re.subn(pattern, replacement, text, count=1, flags=flags)"
+          new_helper = "repl = replacement if callable(replacement) else (lambda _: replacement)\n    out, count = re.subn(pattern, repl, text, count=1, flags=flags)"
+          if old_helper not in text:
               raise SystemExit('Correctif sub_once introuvable')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          text = text.replace(old_helper, new_helper, 1)
+
+          old_behavior = '    r"\\1" + behavior_handler,'
+          new_behavior = '    lambda m: m.group(1) + behavior_handler,'
+          if old_behavior not in text:
+              raise SystemExit('Capture behavior handler introuvable')
+          text = text.replace(old_behavior, new_behavior, 1)
+
+          lines = text.splitlines()
+          replaced_final = False
+          for i, line in enumerate(lines):
+              if 'r"\\1\\n        await syncPendingGradeRoles' in line:
+                  lines[i] = '    lambda m: m.group(1) + "\\n        await syncPendingGradeRoles(interaction.guild, session).catch(() => null);\\n        await syncWarningRoles(interaction.guild, session).catch(() => null);",'
+                  replaced_final = True
+                  break
+          if not replaced_final:
+              raise SystemExit('Capture final role sync introuvable')
+
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
           python3 scripts/apply_v029.py
 
