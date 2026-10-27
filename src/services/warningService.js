@@ -24,6 +24,17 @@ export function setQLevel(employee, level) {
   if (level > 0) employee.infoTokens.push(`Q${Math.min(level, 3)}`);
 }
 
+export function setALevel(employee, level) {
+  employee.infoTokens = (employee.infoTokens || []).filter((x) => !/^A[1-3]$/i.test(x));
+  if (level > 0) employee.infoTokens.push(`A${Math.min(level, 3)}`);
+}
+
+export function incrementALevel(employee) {
+  const next = Math.min(3, getALevel(employee) + 1);
+  setALevel(employee, next);
+  return next;
+}
+
 export function setS1(employee) {
   employee.infoTokens = (employee.infoTokens || []).filter((x) => !/^Q[1-3]$/i.test(x) && !/^S\d*$/i.test(x));
   employee.infoTokens.push('S1');

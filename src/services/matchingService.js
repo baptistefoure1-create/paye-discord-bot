@@ -1,9 +1,47 @@
 import { normalizeName, similarity } from '../utils/normalize.js';
 
-// V0.2 : on reproduit beaucoup plus fidèlement l'étape 3 de Pillbox.
-// Une correspondance exacte après normalisation (accents/casse/tirets) est automatique.
-// Un nom de réanimation réellement "orphelin" n'est PLUS attribué automatiquement
-// par fuzzy matching : on propose seulement des suggestions au gestionnaire.
+function tokens(value) {
+  return normalizeName(value).split(' ').filter(Boolean);
+}
+
+function unorderedKey(value) {
+  return [...tokens(value)].sort((a, b) => a.localeCompare(b, 'fr')).join(' ');
+}
+
+function tokenOverlap(a, b) {
+  const aa = new Set(tokens(a));
+  const bb = new Set(tokens(b));
+  if (!aa.size || !bb.size) return 0;
+  let common = 0;
+  for (const token of aa) if (bb.has(token)) common += 1;
+  return common / Math.max(aa.size, bb.size);
+}
+
+export function smartNameSimilarity(a, b) {
+  const na = normalizeName(a);
+  const nb = normalizeName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (unorderedKey(a) === unorderedKey(b)) return 0.995;
+
+  const ta = tokens(a);
+  const tb = tokens(b);
+  const base = similarity(a, b);
+  const overlap = tokenOverlap(a, b);
+  let score = Math.max(base, (base * 0.72) + (overlap * 0.28));
+
+  if (ta.length >= 2 && tb.length >= 2) {
+    const first = similarity(ta[0], tb[0]);
+    const last = similarity(ta[ta.length - 1], tb[tb.length - 1]);
+    if (last >= 0.99 && first >= 0.72) score = Math.max(score, 0.90 + (first * 0.08));
+    if (first >= 0.99 && last >= 0.72) score = Math.max(score, 0.90 + (last * 0.08));
+  }
+
+  return Math.min(1, score);
+}
+
+// V0.2.9 : les correspondances sûres sont automatiques.
+// Les vrais anciens noms / wipes / cas ambigus restent à valider dans l'interface Étape 3.
 export function matchReanimationsToEmployees(employees, reanimations) {
   const matches = [];
   const anomalies = [];
@@ -30,22 +68,43 @@ export function matchReanimationsToEmployees(employees, reanimations) {
         confidence: 1,
         ambiguous: true,
         orphan: true,
-        candidates: exact.slice(0, 5).map((employee) => ({ employee, score: 1 })),
+        candidates: exact.slice(0, 8).map((employee) => ({ employee, score: 1 })),
       });
       continue;
     }
 
     const candidates = employees
       .filter((e) => !e.isWDV)
-      .map((employee) => ({ employee, score: similarity(rea.name, employee.name) }))
+      .map((employee) => ({ employee, score: smartNameSimilarity(rea.name, employee.name) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);
 
-    // Ce n'est pas une erreur : cela peut être un ancien nom, un wipe ou quelqu'un qui n'est plus EMS.
+    const best = candidates[0];
+    const second = candidates[1];
+    const gap = best ? best.score - (second?.score || 0) : 0;
+    const safeMatch = Boolean(best && (
+      (best.score >= 0.94 && gap >= 0.12)
+      || (best.score >= 0.985 && gap >= 0.05)
+    ));
+
+    if (safeMatch && !usedEmployeeIds.has(best.employee.idUnique)) {
+      usedEmployeeIds.add(best.employee.idUnique);
+      matches.push({
+        rea,
+        employee: best.employee,
+        confidence: best.score,
+        ambiguous: false,
+        exact: false,
+        fuzzyAutomatic: true,
+        candidates,
+      });
+      continue;
+    }
+
     matches.push({
       rea,
       employee: null,
-      confidence: candidates[0]?.score || 0,
+      confidence: best?.score || 0,
       ambiguous: true,
       orphan: true,
       candidates,
