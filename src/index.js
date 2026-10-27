@@ -38,6 +38,8 @@ import {
   generateSixTxt, buildWarningDiscordMessage, buildAnnouncementDiscordMessage,
 } from './services/txtGenerator.js';
 import { sendLog } from './services/logService.js';
+import { getALevel, setALevel } from './services/warningService.js';
+import { syncPendingGradeRoles, syncWarningRoles } from './services/discordRoleService.js';
 import { registerGuildCommands } from './registerCommands.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -122,6 +124,7 @@ function controlRows(session) {
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('pay:add:ppa').setLabel('Ajouter PPA').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('pay:add:bonus').setLabel('Ajouter prime').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('pay:add:behavior-warning').setLabel('Averto comportement').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('pay:manual:up').setLabel('UP manuelle').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('pay:manual:down').setLabel('Rétrogradation').setStyle(ButtonStyle.Secondary),
   );
@@ -141,7 +144,7 @@ function reviewEmbed(session) {
   return new EmbedBuilder()
     .setColor(0x0f766e)
     .setTitle('Récapitulatif avant finalisation')
-    .setDescription('Toutes les décisions automatiques/validées ont été appliquées. Tu peux encore ajouter une PPA, une prime, une UP manuelle ou une rétrogradation.')
+    .setDescription('Toutes les décisions automatiques/validées ont été appliquées. Tu peux encore ajouter une PPA, une prime, un avertissement comportemental, une UP manuelle ou une rétrogradation.')
     .addFields(
       { name: 'Employés actifs', value: String(session.employees.filter((e) => !e.isWDV && !e.dismissed).length), inline: true },
       { name: 'Avertissements actifs', value: String(session.warnings.length), inline: true },
@@ -183,6 +186,7 @@ function currentStepPayload(session) {
 }
 
 async function sendCurrentStep(thread, session, interaction = null) {
+  await syncPendingGradeRoles(thread.guild, session).catch(() => null);
   const question = currentQuestion(session);
   if (question) {
     session.loggedQuestionIds ??= new Set();
@@ -241,75 +245,124 @@ async function startBusinessWorkflow(thread, session, guild) {
   await sendPreanalysis(thread, session, { replace: Boolean(session.stage3MessageId) });
 }
 
-async function sendNextReaResolution(thread, session) {
-  const item = session.reaResolutionQueue?.[0];
-  if (!item) {
-    applyReanimationMatches(session.employees, session.reaMatches);
-    await startBusinessWorkflow(thread, session, thread.guild);
-    return;
-  }
+function step3SelectedReaItem(session) {
+  const index = Number(session.selectedReaMatchIndex);
+  if (!Number.isInteger(index) || index < 0) return null;
+  const item = session.reaMatches?.[index];
+  return (session.reaResolutionQueue || []).includes(item) ? item : null;
+}
 
-  const total = session.reaResolutionTotal || session.reaResolutionQueue.length;
-  session.reaResolutionTotal = total;
-  const current = total - session.reaResolutionQueue.length + 1;
+function step3Cell(value, max) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text.padEnd(max, ' ');
+  return `${text.slice(0, Math.max(1, max - 1))}…`;
+}
 
-  const candidates = (item.candidates || [])
-    .filter((candidate) => candidate.employee && !candidate.employee.isWDV)
-    .slice(0, 10);
+function step3ResolutionPayload(session) {
+  const queue = session.reaResolutionQueue || [];
+  const selected = step3SelectedReaItem(session);
+  const rows = queue.slice(0, 25).map((item, i) => {
+    const best = (item.candidates || [])[0];
+    const suggestion = best?.employee
+      ? `${best.employee.name} ${Math.round((best.score || 0) * 100)}%`
+      : 'Aucune';
+    return `${String(i + 1).padStart(2, ' ')}  ${step3Cell(item.rea.name, 22)} ${String(item.rea.reanimations || 0).padStart(4, ' ')}  ${step3Cell(suggestion, 28)}`;
+  });
+  const table = ['#   Nom réanimations          Réa  Meilleure suggestion', ...rows].join('\n');
+  const more = queue.length > 25 ? `\n… +${queue.length - 25} autre(s) nom(s), affichés après résolution des premiers.` : '';
 
-  const options = candidates.map((candidate) => ({
-    label: `${candidate.employee.name} [${candidate.employee.grade}]`.slice(0, 100),
-    description: `ID ${candidate.employee.idUnique} · suggestion ${Math.round(candidate.score * 100)}%`.slice(0, 100),
-    value: candidate.employee.idUnique,
-  }));
-  options.push({
-    label: 'Pas / plus EMS',
-    description: 'Ce nom des réanimations ne correspond à aucun EMS actuel',
-    value: '__IGNORE__',
+  const orphanOptions = queue.slice(0, 25).map((item) => {
+    const index = session.reaMatches.indexOf(item);
+    const best = (item.candidates || [])[0];
+    return {
+      label: `${item.rea.name} — ${item.rea.reanimations || 0} réa`.slice(0, 100),
+      description: best?.employee
+        ? `Suggestion : ${best.employee.name} (${Math.round((best.score || 0) * 100)}%)`.slice(0, 100)
+        : 'Aucune suggestion sûre',
+      value: String(index),
+    };
   });
 
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('pay:resolve:rea')
-    .setPlaceholder('Ancien nom → EMS actuel, ou Pas / plus EMS')
-    .addOptions(options);
+  const chooseRow = new StringSelectMenuBuilder()
+    .setCustomId('pay:resolve:rea:pick')
+    .setPlaceholder('Choisir un nom du tableau à traiter')
+    .addOptions(orphanOptions);
+
+  const components = [new ActionRowBuilder().addComponents(chooseRow)];
+
+  if (selected) {
+    const candidates = (selected.candidates || [])
+      .filter((candidate) => candidate.employee && !candidate.employee.isWDV)
+      .slice(0, 24)
+      .map((candidate) => ({
+        label: `${candidate.employee.name} [${candidate.employee.grade}]`.slice(0, 100),
+        description: `ID ${candidate.employee.idUnique} · suggestion ${Math.round((candidate.score || 0) * 100)}%`.slice(0, 100),
+        value: candidate.employee.idUnique,
+      }));
+    candidates.push({
+      label: 'Pas / plus EMS',
+      description: 'Ignorer ce nom : il ne correspond à aucun EMS actuel',
+      value: '__IGNORE__',
+    });
+    const target = new StringSelectMenuBuilder()
+      .setCustomId('pay:resolve:rea:target')
+      .setPlaceholder(`Associer ${selected.rea.name}`.slice(0, 150))
+      .addOptions(candidates);
+    components.push(new ActionRowBuilder().addComponents(target));
+  }
 
   const manual = new ButtonBuilder()
     .setCustomId('pay:resolve:rea:manual')
     .setLabel('Choisir un autre EMS')
     .setEmoji('🔎')
-    .setStyle(ButtonStyle.Primary);
-
+    .setStyle(ButtonStyle.Primary)
+    .setDisabled(!selected);
+  const ignore = new ButtonBuilder()
+    .setCustomId('pay:resolve:rea:ignore')
+    .setLabel('Pas / plus EMS')
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!selected);
   const skipRest = new ButtonBuilder()
     .setCustomId('pay:resolve:rea:skipall')
-    .setLabel('Ignorer tous les noms restants')
+    .setLabel('Ignorer tous les restants')
     .setEmoji('⏭️')
     .setStyle(ButtonStyle.Secondary);
-
   const cancel = new ButtonBuilder()
     .setCustomId('pay:cancel')
     .setLabel('Annuler')
     .setEmoji('❌')
     .setStyle(ButtonStyle.Danger);
+  components.push(new ActionRowBuilder().addComponents(manual, ignore, skipRest, cancel));
 
-  const payload = {
+  return {
     embeds: [
       new EmbedBuilder()
         .setColor(0xd97706)
         .setTitle('Étape 3 — Wipe / changement de nom')
         .setDescription(
-          `**Nom non reconnu dans le tableau EMS :**\n${item.rea.name} — **${item.rea.reanimations} réanimations**\n\n` +
-          `S'il s'agit d'un ancien nom / wipe, sélectionne l'EMS actuel.\n` +
-          `Si cette personne n'est plus EMS, choisis **Pas / plus EMS**.\n\n` +
-          `ℹ️ Les employés EMS qui ne sont reliés à aucun ancien nom restent simplement EMS : il n'y a rien à leur assigner.`,
+          `Tous les noms réellement non reconnus sont regroupés ici. Tu n'as plus une question différente pour chaque personne.\n\n` +
+          '```text\n' + table.slice(0, 3000) + more + '\n```\n' +
+          (selected
+            ? `**Sélection :** ${selected.rea.name} — **${selected.rea.reanimations || 0} réanimations**\nChoisis l’EMS actuel dans la liste, **Pas / plus EMS**, ou **Choisir un autre EMS**.`
+            : 'Choisis simplement une ligne du tableau ci-dessous pour la résoudre.'),
         )
-        .setFooter({ text: `Nom orphelin ${current}/${total} · seuls les noms réellement non reconnus sont affichés` }),
+        .setFooter({ text: `${queue.length} nom(s) à résoudre · une seule carte se met à jour` }),
     ],
-    components: [
-      new ActionRowBuilder().addComponents(select),
-      new ActionRowBuilder().addComponents(manual, skipRest, cancel),
-    ],
+    components,
   };
+}
 
+async function sendNextReaResolution(thread, session) {
+  const queue = session.reaResolutionQueue || [];
+  if (!queue.length) {
+    session.selectedReaMatchIndex = null;
+    applyReanimationMatches(session.employees, session.reaMatches);
+    await startBusinessWorkflow(thread, session, thread.guild);
+    return;
+  }
+
+  session.stage = 'resolve_rea';
+  const payload = step3ResolutionPayload(session);
   if (session.stage3MessageId) {
     const existing = await thread.messages.fetch(session.stage3MessageId).catch(() => null);
     if (existing) {
@@ -319,6 +372,7 @@ async function sendNextReaResolution(thread, session) {
   }
   const sent = await thread.send(payload);
   session.stage3MessageId = sent.id;
+  session.workflowMessageId = sent.id;
 }
 
 async function sendNextDiscordResolution(thread, session) {
@@ -465,6 +519,27 @@ function stage3ManualLinkModal() {
     .setStyle(TextInputStyle.Short)
     .setRequired(true);
   modal.addComponents(new ActionRowBuilder().addComponents(employee));
+  return modal;
+}
+
+function behaviorWarningModal() {
+  const modal = new ModalBuilder().setCustomId('pay:modal:behavior-warning').setTitle('Avertissement comportemental');
+  const employee = new TextInputBuilder()
+    .setCustomId('employee')
+    .setLabel('Nom RP ou ID unique')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+  const reason = new TextInputBuilder()
+    .setCustomId('reason')
+    .setLabel('Raison (optionnel)')
+    .setPlaceholder('Ex : comportement en service, non-respect des consignes…')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(300);
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(employee),
+    new ActionRowBuilder().addComponents(reason),
+  );
   return modal;
 }
 
@@ -763,7 +838,24 @@ client.on('interactionCreate', async (interaction) => {
 
       if (interaction.customId === 'pay:resolve:rea:manual') {
         if (session.stage !== 'resolve_rea') return interaction.reply({ content: 'Cette action n’est disponible qu’à l’étape 3.', ephemeral: true });
+        if (!step3SelectedReaItem(session)) return interaction.reply({ content: 'Choisis d’abord une ligne dans le tableau.', ephemeral: true });
         return interaction.showModal(stage3ManualLinkModal());
+      }
+
+      if (interaction.customId === 'pay:resolve:rea:ignore') {
+        if (session.stage !== 'resolve_rea') return interaction.reply({ content: 'Cette action n’est disponible qu’à l’étape 3.', ephemeral: true });
+        const item = step3SelectedReaItem(session);
+        if (!item) return interaction.reply({ content: 'Choisis d’abord une ligne dans le tableau.', ephemeral: true });
+        item.employee = null;
+        item.ambiguous = false;
+        session.ignoredReaNames ??= [];
+        session.ignoredReaNames.push(item.rea.name);
+        session.reaResolutionQueue = (session.reaResolutionQueue || []).filter((x) => x !== item);
+        session.selectedReaMatchIndex = null;
+        await interaction.deferUpdate();
+        await logAction(session, interaction, 'Étape 3 : pas / plus EMS', null, item.rea.name);
+        await sendNextReaResolution(interaction.channel, session);
+        return;
       }
 
       if (interaction.customId === 'pay:resolve:rea:skipall') {
@@ -776,6 +868,7 @@ client.on('interactionCreate', async (interaction) => {
         }
         const count = session.reaResolutionQueue?.length || 0;
         session.reaResolutionQueue = [];
+        session.selectedReaMatchIndex = null;
         await interaction.deferUpdate();
         await logAction(session, interaction, 'Étape 3 : noms restants ignorés', null, `${count} nom(s) considéré(s) comme pas/plus EMS`);
         applyReanimationMatches(session.employees, session.reaMatches);
@@ -853,6 +946,7 @@ client.on('interactionCreate', async (interaction) => {
       if (interaction.customId === 'pay:add:bonus') return interaction.showModal(amountModal('pay:modal:bonus', 'Ajouter une prime', 'Montant de la prime'));
       if (interaction.customId === 'pay:manual:up') return interaction.showModal(gradeModal('pay:modal:up', 'Promotion manuelle', 'Grade cible supérieur'));
       if (interaction.customId === 'pay:manual:down') return interaction.showModal(gradeModal('pay:modal:down', 'Rétrogradation manuelle', 'Grade cible inférieur'));
+      if (interaction.customId === 'pay:add:behavior-warning') return interaction.showModal(behaviorWarningModal());
 
       if (interaction.customId === 'pay:finalize') {
         if (session.stage !== 'review') return interaction.reply({ content: '❌ Des décisions sont encore en cours.', ephemeral: true });
@@ -860,6 +954,8 @@ client.on('interactionCreate', async (interaction) => {
         session.locked = true;
         computeTop3(session);
         refreshWarnings(session);
+        await syncPendingGradeRoles(interaction.guild, session).catch(() => null);
+        await syncWarningRoles(interaction.guild, session).catch(() => null);
 
         const six = generateSixTxt(session);
         const payChannel = await client.channels.fetch(CHANNELS.PAYROLL);
@@ -904,26 +1000,38 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === 'pay:resolve:rea') {
+    if (interaction.isStringSelectMenu() && interaction.customId === 'pay:resolve:rea:pick') {
       if (!managerGuard(interaction)) return;
       const session = sessionGuard(interaction);
-      if (!session || session.stage !== 'resolve_rea') return;
-      const item = session.reaResolutionQueue?.[0];
-      if (!item) return interaction.reply({ content: 'Aucune correspondance à résoudre.', ephemeral: true });
-      const selected = interaction.values[0];
-      if (selected === '__IGNORE__') {
+      if (!session || session.stage !== 'resolve_rea') return interaction.reply({ content: 'L’étape 3 n’est plus active.', ephemeral: true });
+      const index = Number(interaction.values[0]);
+      const item = session.reaMatches?.[index];
+      if (!item || !(session.reaResolutionQueue || []).includes(item)) return interaction.reply({ content: 'Cette ligne a déjà été traitée.', ephemeral: true });
+      session.selectedReaMatchIndex = index;
+      await interaction.update(step3ResolutionPayload(session));
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === 'pay:resolve:rea:target') {
+      if (!managerGuard(interaction)) return;
+      const session = sessionGuard(interaction);
+      if (!session || session.stage !== 'resolve_rea') return interaction.reply({ content: 'L’étape 3 n’est plus active.', ephemeral: true });
+      const item = step3SelectedReaItem(session);
+      if (!item) return interaction.reply({ content: 'Sélection expirée : choisis de nouveau une ligne.', ephemeral: true });
+      const value = interaction.values[0];
+      if (value === '__IGNORE__') {
         item.employee = null;
-        item.ambiguous = false;
         session.ignoredReaNames ??= [];
         session.ignoredReaNames.push(item.rea.name);
       } else {
-        const employee = session.employees.find((e) => e.idUnique === selected);
-        if (!employee) return interaction.reply({ content: 'Employé sélectionné introuvable.', ephemeral: true });
+        const employee = session.employees.find((e) => e.idUnique === value && !e.isWDV);
+        if (!employee) return interaction.reply({ content: 'EMS introuvable.', ephemeral: true });
         item.employee = employee;
-        item.ambiguous = false;
       }
-      session.reaResolutionQueue.shift();
-      await interaction.update({ components: [] });
+      item.ambiguous = false;
+      session.reaResolutionQueue = (session.reaResolutionQueue || []).filter((x) => x !== item);
+      session.selectedReaMatchIndex = null;
+      await interaction.deferUpdate();
       await logAction(session, interaction, 'Étape 3 : correspondance réanimations', item.employee, `${item.rea.name} → ${item.employee?.name || 'pas/plus EMS'}`);
       await sendNextReaResolution(interaction.channel, session);
       return;
@@ -981,13 +1089,14 @@ client.on('interactionCreate', async (interaction) => {
       if (!managerGuard(interaction)) return;
       const session = sessionGuard(interaction);
       if (!session || session.stage !== 'resolve_rea') return interaction.reply({ content: 'L’étape 3 n’est plus active.', ephemeral: true });
-      const item = session.reaResolutionQueue?.[0];
-      if (!item) return interaction.reply({ content: 'Aucun ancien nom à relier.', ephemeral: true });
+      const item = step3SelectedReaItem(session);
+      if (!item) return interaction.reply({ content: 'Sélection expirée : choisis de nouveau une ligne du tableau.', ephemeral: true });
       const employee = employeeByName(session, interaction.fields.getTextInputValue('employee'));
       if (!employee || employee.isWDV) return interaction.reply({ content: '❌ EMS introuvable ou WDV. Utilise son nom RP actuel ou son ID unique.', ephemeral: true });
       item.employee = employee;
       item.ambiguous = false;
-      session.reaResolutionQueue.shift();
+      session.reaResolutionQueue = (session.reaResolutionQueue || []).filter((x) => x !== item);
+      session.selectedReaMatchIndex = null;
       await interaction.reply({ content: `✅ **${item.rea.name}** (${item.rea.reanimations} réa) lié à **${employee.name}**.`, ephemeral: true });
       await logAction(session, interaction, 'Étape 3 : lien manuel ancien nom', employee, `${item.rea.name} → ${employee.name}`);
       await sendNextReaResolution(interaction.channel, session);
@@ -1032,6 +1141,28 @@ client.on('interactionCreate', async (interaction) => {
 
       const employee = employeeByName(session, interaction.fields.getTextInputValue('employee'));
       if (!employee || employee.isWDV) return interaction.reply({ content: '❌ Employé introuvable ou WDV. Utilise le nom RP exact ou l’ID unique.', ephemeral: true });
+      if (interaction.customId === 'pay:modal:behavior-warning') {
+        const currentLevel = getALevel(employee);
+        const nextLevel = Math.min(3, currentLevel + 1);
+        setALevel(employee, nextLevel);
+        const reason = interaction.fields.getTextInputValue('reason').trim();
+        session.behaviorWarnings ??= [];
+        session.behaviorWarnings.push({
+          employeeId: employee.idUnique,
+          name: employee.name,
+          level: nextLevel,
+          reason,
+          managerId: interaction.user.id,
+          createdAt: Date.now(),
+        });
+        refreshWarnings(session);
+        await syncWarningRoles(interaction.guild, session).catch(() => null);
+        await interaction.reply({ content: `✅ Avertissement comportemental : **${employee.name} → A${nextLevel}**${reason ? ` — ${reason}` : ''}`, ephemeral: true });
+        await logAction(session, interaction, 'Avertissement comportemental', employee, `A${nextLevel}${reason ? ` — ${reason}` : ''}`);
+        await sendCurrentStep(interaction.channel, session);
+        return;
+      }
+
 
       if (interaction.customId === 'pay:modal:ppa' || interaction.customId === 'pay:modal:bonus') {
         if (isBnvl(employee)) return interaction.reply({ content: '❌ Un BNVL ne peut recevoir ni PPA ni prime optionnelle.', ephemeral: true });

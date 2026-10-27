@@ -1,8 +1,8 @@
 {
   "name": "ems-discord-paie-bot",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
-  "description": "Bot Discord de gestion des payes EMS - version Northflank 24/7",
+  "description": "Bot Discord de gestion des payes EMS - V0.2.9 interface rapide",
   "type": "module",
   "main": "src/index.js",
   "scripts": {

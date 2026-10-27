@@ -1,0 +1,11 @@
+PILLBOX PAIE TEST - V0.2.9
+==============================
+
+- Étape 3 refondue en tableau/interface Discord unique.
+- Les noms très proches et non ambigus sont rapprochés automatiquement.
+- Les vrais anciens noms/wipes restent à valider manuellement.
+- Ajout d'un avertissement comportemental manuel A1/A2/A3.
+- Synchronisation automatique des rôles Discord lors des UP/rétrogradations.
+- Synchronisation des rôles Averto 1/2/3.
+- Annonce Discord remise au format Pillbox de base (samedi → mercredi).
+- Les anciens flux et les 6 TXT restent conservés.

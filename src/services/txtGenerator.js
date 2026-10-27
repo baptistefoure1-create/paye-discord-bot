@@ -117,6 +117,14 @@ function isRealUp(session, employee) {
   return Boolean(p && GRADE_ORDER.indexOf(p.to) > GRADE_ORDER.indexOf(p.from));
 }
 
+function warningReasonWithContext(session, employee) {
+  const base = warningReason(employee);
+  const manual = [...(session.behaviorWarnings || [])]
+    .reverse()
+    .find((item) => item.employeeId === employee.idUnique && item.reason);
+  return manual?.reason ? `${base} — ${manual.reason}` : base;
+}
+
 function warningsTxt(session) {
   const groups = new Map([[1, []], [2, []], [3, []]]);
   for (const e of session.employees) {
@@ -134,7 +142,7 @@ function warningsTxt(session) {
     lines.push(`@Averto ${level}`);
     for (const e of arr) {
       const suffix = level === 3 ? ' (licenciement semaine prochaine si quota non atteint)' : '';
-      lines.push(`@${e.name} (${warningReason(e)}${suffix})`);
+      lines.push(`@${e.name} (${warningReasonWithContext(session, e)}${suffix})`);
     }
     lines.push('');
   }
@@ -179,14 +187,13 @@ function computeAnnonceTiming(now = new Date()) {
 }
 
 function announcementTxt(session) {
-  const { greeting, moment } = computeAnnonceTiming();
   const fmtMoney = (n) => Math.round(n).toLocaleString('de-DE');
   const lines = [
-    `**${greeting} à tous,**`,
-    `<@&${ROLES.EMPLOYEES}>`,
+    `**Bonsoir à tous,** <@&${ROLES.EMPLOYEES}>`,
+    '',
     "Une nouvelle semaine commence à l'hôpital Pillbox !",
-    '🏆',
-    '**Top 3 de la semaine :**',
+    '',
+    '🏆 **Top 3 de la semaine :**',
   ];
 
   const medals = ['1️⃣', '2️⃣', '3️⃣'];
@@ -198,8 +205,8 @@ function announcementTxt(session) {
   lines.push(`(Record à battre : ${new Intl.NumberFormat('fr-FR').format(session.record).replace(/\u202f/g, ' ')} réanimations)`);
   if (session.top3[0] && session.top3[0].reanimations > session.record) lines.push('🎉 NOUVEAU RECORD BATTU CETTE SEMAINE !');
   lines.push('');
-  lines.push(`Les payes de la semaine (ainsi que les Up) seront disponibles ${moment}`);
-  lines.push("et ce jusqu'à mercredi. Après cette date, les payes et UP ne seront");
+  lines.push('Les payes de la semaine (ainsi que les Up) seront disponibles **samedi**');
+  lines.push("et ce jusqu'à **mercredi**. Après cette date, les payes et UP ne seront");
   lines.push('plus récupérables.');
   lines.push('');
   lines.push(`Si je ne suis pas disponible, n'hésitez pas à ping un <@&${ROLES.HIGH_GRADE}> !`);
@@ -294,7 +301,7 @@ export function buildWarningDiscordMessage(session) {
     for (const e of arr) {
       const suffix = level === 3 ? ' (licenciement semaine prochaine si quota non atteint)' : '';
       const target = memberMention(session, e.idUnique, e.name);
-      lines.push(`• ${target} — ${warningReason(e)}${suffix}`);
+      lines.push(`• ${target} — ${warningReasonWithContext(session, e)}${suffix}`);
     }
     lines.push('');
   }
